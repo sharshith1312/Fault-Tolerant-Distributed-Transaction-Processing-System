@@ -1,0 +1,250 @@
+syntax = "proto3";
+
+package paxos;
+
+service PaxosService {
+    // Paxos Protocol
+    rpc SendPrepare(PrepareMsg) returns (PromiseMsg);
+    rpc SendAccept(AcceptMsg) returns (AcceptedMsg);
+    rpc SendCommit(CommitMsg) returns (Empty);
+    rpc SendNewView(NewViewMsg) returns (Empty);
+    rpc SendCheckpoint(CheckpointMsg) returns (Empty);
+    rpc SendHeartbeat(HeartbeatMsg) returns (Empty);
+    
+    // Client Requests
+    rpc HandleClientRequest(ClientRequest) returns (ClientReply);
+    rpc HandleBalanceRequest(BalanceRequest) returns (BalanceResponse);
+    
+    // Two-Phase Commit Protocol
+    rpc SendPrepare2PC(Prepare2PCMsg) returns (Prepared2PCMsg);
+    rpc SendCommit2PC(Commit2PCMsg) returns (Ack2PCMsg);
+    rpc SendAbort2PC(Abort2PCMsg) returns (Ack2PCMsg);
+    
+    // CLI functionality
+    rpc GetLog(Empty) returns (LogResponse);
+    rpc GetDatabase(Empty) returns (DatabaseResponse);
+    rpc GetAllBalances(Empty) returns (AllBalancesResponse);
+    rpc GetStatus(StatusRequest) returns (StatusResponse);
+    rpc GetView(Empty) returns (ViewResponse);
+    rpc RequestCheckpoint(CheckpointRequest) returns (CheckpointResponse);
+    rpc SetIdle(IdleRequest) returns (IdleResponse);
+    rpc GetNodeInfo(Empty) returns (NodeInfoResponse);
+    rpc ResetSystemState(Empty) returns (Empty);
+    rpc TriggerElection(Empty) returns (ElectionResponse);
+}
+
+message ElectionResponse {
+    bool success = 1;
+    int32 leader_id = 2;
+    string message = 3;
+}
+
+message Empty {}
+
+// Ballot Number
+message BallotNumber {
+    int32 number = 1;
+    int32 node_id = 2;
+}
+
+// Client Communication
+message ClientRequest {
+    int32 client_id = 1;  // Changed from string to int32
+    int64 timestamp = 2;
+    string transaction = 3;  // "(sender, receiver, amount)" or "(client_id)" for balance
+}
+
+message ClientReply {
+    bool success = 1;
+    string message = 2;
+    int32 leader_id = 3;
+    int64 request_timestamp = 4;
+}
+
+// Balance Query (Read-Only)
+message BalanceRequest {
+    int32 client_id = 1;
+}
+
+message BalanceResponse {
+    bool success = 1;
+    float balance = 2;
+    int32 client_id = 3;
+    string message = 4;
+}
+
+// Log Entry with 2PC Support
+message LogEntry {
+    BallotNumber ballot_num = 1;
+    int32 sequence_num = 2;
+    ClientRequest request = 3;
+    bool is_noop = 4;
+    string status = 5; // "A" (Accepted), "C" (Committed), "E" (Executed), "X" (No Status)
+    string phase = 6;  // NULL (intra-shard), "P" (prepare), "C" (commit), "A" (abort)
+    string transaction_type = 7;  // "INTRA", "CROSS", "BALANCE"
+    string transaction_id = 8;  // Unique transaction ID for 2PC
+}
+
+// Phase 1: Leader Election (Paxos)
+message PrepareMsg {
+    BallotNumber ballot_num = 1;
+}
+
+message PromiseMsg {
+    bool acknowledged = 1;
+    BallotNumber ballot_num = 2;
+    repeated LogEntry accept_log = 3;
+    CheckpointState latest_checkpoint = 4;
+    bool timer_not_expired = 5;
+}
+
+// Phase 2: Normal Operation (Paxos)
+message AcceptMsg {
+    BallotNumber ballot_num = 1;
+    int32 sequence_num = 2;
+    ClientRequest request = 3;
+    string phase = 4;  // For 2PC: "P", "C", "A", or empty for normal
+    string transaction_id = 5;  // For 2PC tracking
+}
+
+message AcceptedMsg {
+    BallotNumber ballot_num = 1;
+    int32 sequence_num = 2;
+    int32 node_id = 3;
+}
+
+message CommitMsg {
+    BallotNumber ballot_num = 1;
+    int32 sequence_num = 2;
+    ClientRequest request = 3;
+    string phase = 4;  // For 2PC: "P", "C", "A"
+}
+
+// Leader Recovery
+message NewViewMsg {
+    BallotNumber ballot_num = 1;
+    repeated LogEntry accept_log = 2;
+    CheckpointState latest_checkpoint = 3;
+}
+
+// Checkpointing
+message CheckpointState {
+    int32 sequence_num = 1;
+    bytes state_digest = 2;
+}
+
+message CheckpointMsg {
+    int32 sequence_num = 1;
+    string state_datastore = 2;
+}
+
+// Heartbeat
+message HeartbeatMsg {
+    int32 leader_id = 1;
+    BallotNumber ballot_num = 2;
+}
+
+// ==================== TWO-PHASE COMMIT MESSAGES ====================
+
+// 2PC Phase 1: PREPARE
+message Prepare2PCMsg {
+    string transaction_id = 1;
+    int32 sender = 2;
+    int32 receiver = 3;
+    float amount = 4;
+    int32 coordinator_cluster = 5;
+    int32 participant_cluster = 6;
+    ClientRequest original_request = 7;
+    int64 timestamp = 8;
+}
+
+// 2PC Phase 1: PREPARED (or ABORT)
+message Prepared2PCMsg {
+    bool prepared = 1;  // true = PREPARED, false = ABORT
+    string transaction_id = 2;
+    int32 participant_cluster = 3;
+    string message = 4;  // Reason if aborted
+}
+
+// 2PC Phase 2: COMMIT
+message Commit2PCMsg {
+    string transaction_id = 1;
+    int32 coordinator_cluster = 2;
+}
+
+// 2PC Phase 2: ABORT
+message Abort2PCMsg {
+    string transaction_id = 1;
+    int32 coordinator_cluster = 2;
+    string reason = 3;
+}
+
+// 2PC Acknowledgment
+message Ack2PCMsg {
+    bool success = 1;
+    string transaction_id = 2;
+    string message = 3;
+}
+
+// ==================== CLI MESSAGES ====================
+
+message LogResponse {
+    repeated LogEntry entries = 1;
+    int32 node_id = 2;
+}
+
+message DatabaseResponse {
+    map<int32, float> balances = 1;  // Changed from string to int32
+    int32 node_id = 2;
+}
+
+message BalanceEntry {
+    int32 client_id = 1;
+    float balance = 2;
+}
+
+message AllBalancesResponse {
+    repeated BalanceEntry entries = 1;
+    int32 node_id = 2;
+}
+
+message StatusRequest {
+    int32 sequence_num = 1;
+}
+
+message StatusResponse {
+    int32 sequence_num = 1;
+    map<int32, string> node_status = 2;
+    map<int32, string> node_status_message = 3;
+}
+
+message ViewResponse {
+    repeated NewViewMsg new_views = 1;
+}
+
+message CheckpointRequest {
+    int32 sequence_num = 1;
+}
+
+message CheckpointResponse {
+    bool has_checkpoint = 1;
+    CheckpointMsg checkpoint = 2;
+}
+
+message IdleRequest {
+    bool is_idle = 1;
+}
+
+message IdleResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message NodeInfoResponse {
+    int32 node_id = 1;
+    string role = 2;
+    bool is_idle = 3;
+    int32 leader_id = 4;
+    int32 ballot_number = 5;
+    int32 ballot_node_id = 6;
+}

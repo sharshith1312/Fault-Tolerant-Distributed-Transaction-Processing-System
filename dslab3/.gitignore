@@ -1,0 +1,13 @@
+db/*.json
+db/*.db
+db/*.db-lock
+db/*.db-shm
+db/*.db-wal
+logs/*.log
+__pycache__/
+.venv/
+need_to_fix
+*.dat
+bench.py
+*-Report.pdf
+*-Report.docx
